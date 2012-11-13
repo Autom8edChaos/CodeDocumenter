@@ -15,8 +15,8 @@ Sub main
 	dim scriptToXml 	: 	Set scriptToXml = new cls_ScriptToXml
 	
 	scriptToXml.RootNode = "module"
-	scriptToXml.FileName = Wscript.Argument(0)
-	Set scriptToXml.ScriptObject = ParseScript (WScript.Argument(1))
+	scriptToXml.FileName = Wscript.Arguments.Item(1)
+	Set scriptToXml.ScriptObject = ParseScript (WScript.Arguments.Item(0))
 	scriptToXml.ScriptObject.Add "destination", scriptToXml.FileName
 	scriptToXml.Execute
 	
@@ -90,6 +90,7 @@ Class cls_ScriptToXml
 
 	Public Sub Execute
 		objToXmlElems xmlDoc_, RootNode, ScriptObject
+msgbox "saving to " & FileName
 		xmlDoc_.Save FileName
 	End Sub
 	
