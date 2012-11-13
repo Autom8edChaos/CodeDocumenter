@@ -1,0 +1,561 @@
+<module><innercode>Option Explicit
+Const ForReading = 1, forAppending = 8
+Const TristateUseDefault = -2, TristateTrue = -1, TristateFalse = 0
+
+const functionPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*()\s*(function)\s+()([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end function"
+const classPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*()\s*(class)\s+()([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end class"
+const subPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*()\s*(sub)\s+()([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end sub"
+const propertyPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*(default)?\s*(property)\s+(set|get|let)\s+([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end property"
+
+
+main 
+
+Sub main
+
+	dim scriptToXml 	: 	Set scriptToXml = new cls_ScriptToXml
+	
+	scriptToXml.RootNode = "module"
+	scriptToXml.FileName = Wscript.Arguments.Item(1)
+	Set scriptToXml.ScriptObject = ParseScript (WScript.Arguments.Item(0))
+	scriptToXml.ScriptObject.Add "destination", scriptToXml.FileName
+	scriptToXml.Execute
+	
+End Sub
+
+Public Function ParseScript(fileName)
+
+	dim cls
+	dim codeDictionary
+	Dim classExtractor
+		
+	Set codeDictionary = CreateObject("Scripting.Dictionary")
+	
+	codeDictionary.Add "innercode", ReturnFileAsText(fileName)
+	codeDictionary.Add "source", fileName
+		
+	' First, extract the class
+	Set classExtractor = new_ClassExtractor
+	
+	' Add the class objects to the codedictionary
+	CodeDictionary.Add "classcollection", classExtractor.CodeToCollection(CodeDictionary.Item("innercode"))
+	CodeDictionary.Add "outercode", classExtractor.OuterCode
+	
+	' Parse the code inside all classes to function, sub and property objects
+	for each cls in CodeDictionary.item("classcollection")
+		cls.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(cls.item("innercode"))
+		cls.Add "subcollection", (new_SubExtractor).CodeToCollection(cls.item("innercode"))
+		cls.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(cls.item("innercode"))
+	next
+	
+	' Parse the code outside the classes to function, sub and property objects
+	CodeDictionary.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(CodeDictionary.item("outercode"))
+	CodeDictionary.Add "subcollection", (new_subExtractor).CodeToCollection(CodeDictionary.item("outercode"))
+	CodeDictionary.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(CodeDictionary.item("outercode"))			
+	
+	Set ParseScript = CodeDictionary	
+	
+end Function
+
+Class cls_ScriptToXml
+
+	private xmlDoc_
+	Private Sub Class_Initialize
+		RootNode = "root"
+		Set xmlDoc_ = CreateObject("Microsoft.XMLDOM")
+	End Sub
+
+	private rootNode_
+	Public Property Let RootNode(p)
+		rootNode_ = p
+	End Property
+	Public Property Get RootNode
+		RootNode = rootNode_
+	End Property
+	
+	Private fileName_
+	Public Property Let FileName(p)
+		fileName_ = p
+	End Property
+	Public Property Get FileName
+		FileName = fileName_
+	End Property
+	
+	Private scriptObject_
+	Public Property Set ScriptObject(o)
+		Set scriptObject_ = o
+	End Property
+	Public Property Get ScriptObject
+		Set ScriptObject = scriptObject_
+	End Property
+
+	Public Sub Execute
+		objToXmlElems xmlDoc_, RootNode, ScriptObject
+msgbox "saving to " &amp; FileName
+		xmlDoc_.Save FileName
+	End Sub
+	
+	Private Sub objToXmlElems(xmlObj, nodename, t)
+		dim elem, k, child
+		
+		Select Case TypeName(t)
+			Case "ArrayList"
+				set elem = xmlDoc_.CreateElement(nodename)
+				for each k in t
+					objToXmlElems elem, replace(nodename, "collection", ""), k
+				next
+				xmlObj.appendChild elem
+			
+			Case "Dictionary"
+				Set elem = xmlDoc_.CreateElement(nodename)
+				for each k in t.keys
+					objToXmlElems elem, k, t.item(k)
+				next
+				xmlObj.AppendChild elem
+			
+			Case Else
+				Set elem = xmlDoc_.CreateElement(nodename)
+				elem.Text = t
+				xmlObj.AppendChild(elem)
+			
+		end select
+	End Sub
+
+
+End Class
+
+
+
+Public Function ReturnFileAsText(filename)
+
+	Dim objFSO, objFile
+
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	Set objFile = objFSO.OpenTextFile(filename, ForReading, False, TristateUseDefault)
+	
+	ReturnFileAsText = objFile.ReadAll
+
+End Function
+
+Public Function new_FunctionExtractor
+	Set new_FunctionExtractor = new cls_CodeExtractor
+	new_FunctionExtractor.Pattern = functionPattern
+End Function
+
+Public Function new_SubExtractor
+	Set new_SubExtractor = new cls_CodeExtractor
+	new_SubExtractor.Pattern = subPattern
+End Function
+
+Public Function new_PropertyExtractor
+	Set new_PropertyExtractor = new cls_CodeExtractor
+	new_PropertyExtractor.Pattern = propertyPattern
+End Function
+
+Public Function new_ClassExtractor
+	Set new_ClassExtractor = new cls_CodeExtractor
+	new_ClassExtractor.Pattern = classPattern
+End Function
+
+Private Function new_ExtractorPrototype
+	Dim o : set o = new cls_CodeExtractor
+	o.AddRegexmatchParser 0, getref("topcommentParser")
+	' etc.
+	Set new_ExtractorPrototype = o
+End Function
+
+
+Class cls_CodeExtractor
+
+	private originalCode_
+	Public Property Get OriginalCode
+		OriginalCode = originalCode_
+	End Property
+	Private Property Let OriginalCode(p)
+		originalCode_ = p
+	End Property
+	
+	private outerCode_
+	Public Property Get OuterCode
+		OuterCode = outerCode_
+	End Property
+	Private Property Let OuterCode(p)
+		OuterCode_ = p
+	End Property
+	
+	private pattern_
+	Public Property Let Pattern(p)
+		pattern_ = P
+	End Property
+	Public Property Get Pattern
+		Pattern = pattern_
+	End Property
+	
+	Public Function CodeToCollection(code)
+		
+		dim i, re, matches, match
+		dim objCollection, contentDictionary
+		
+		OriginalCode = code
+		
+		Set objCollection = CreateObject("System.Collections.ArrayList")
+		
+		Set re = new regexp
+		re.IgnoreCase = True
+		re.Global = True
+		re.Pattern = Pattern
+				
+		Set matches = re.Execute(code)
+			
+		for each match in Matches
+			
+			set contentDictionary = CreateObject("Scripting.Dictionary")
+			
+			contentDictionary.Add "topcomment", match.submatches(0)	' comment
+			contentDictionary.Add "scope", match.submatches(2)	' comment
+			contentDictionary.Add "default", match.submatches(3)	' comment
+			contentDictionary.Add "type", match.submatches(4)	' comment
+			contentDictionary.Add "getsetlet", match.submatches(5)	' comment
+			contentDictionary.Add "nameandparams", match.submatches(6)	' comment
+			contentDictionary.Add "innercode", match.submatches(7)	' comment
+			
+			objCollection.Add contentDictionary
+		next
+		
+		OuterCode = re.Replace(code, "")
+		
+		Set CodeToCollection = objCollection		
+	End Function
+
+End Class
+
+
+		
+		
+</innercode><source>C:\Users\Bas\Documents\GitHub\CodeDocumenter\documentReader.vbs</source><classcollection><class><topcomment></topcomment><scope></scope><default></default><type>Class</type><getsetlet></getsetlet><nameandparams>cls_ScriptToXml</nameandparams><innercode>
+	private xmlDoc_
+	Private Sub Class_Initialize
+		RootNode = "root"
+		Set xmlDoc_ = CreateObject("Microsoft.XMLDOM")
+	End Sub
+
+	private rootNode_
+	Public Property Let RootNode(p)
+		rootNode_ = p
+	End Property
+	Public Property Get RootNode
+		RootNode = rootNode_
+	End Property
+	
+	Private fileName_
+	Public Property Let FileName(p)
+		fileName_ = p
+	End Property
+	Public Property Get FileName
+		FileName = fileName_
+	End Property
+	
+	Private scriptObject_
+	Public Property Set ScriptObject(o)
+		Set scriptObject_ = o
+	End Property
+	Public Property Get ScriptObject
+		Set ScriptObject = scriptObject_
+	End Property
+
+	Public Sub Execute
+		objToXmlElems xmlDoc_, RootNode, ScriptObject
+msgbox "saving to " &amp; FileName
+		xmlDoc_.Save FileName
+	End Sub
+	
+	Private Sub objToXmlElems(xmlObj, nodename, t)
+		dim elem, k, child
+		
+		Select Case TypeName(t)
+			Case "ArrayList"
+				set elem = xmlDoc_.CreateElement(nodename)
+				for each k in t
+					objToXmlElems elem, replace(nodename, "collection", ""), k
+				next
+				xmlObj.appendChild elem
+			
+			Case "Dictionary"
+				Set elem = xmlDoc_.CreateElement(nodename)
+				for each k in t.keys
+					objToXmlElems elem, k, t.item(k)
+				next
+				xmlObj.AppendChild elem
+			
+			Case Else
+				Set elem = xmlDoc_.CreateElement(nodename)
+				elem.Text = t
+				xmlObj.AppendChild(elem)
+			
+		end select
+	End Sub</innercode><functioncollection/><subcollection><sub><topcomment></topcomment><scope>Private</scope><default></default><type>Sub</type><getsetlet></getsetlet><nameandparams>Class_Initialize</nameandparams><innercode>		RootNode = "root"
+		Set xmlDoc_ = CreateObject("Microsoft.XMLDOM")</innercode></sub><sub><topcomment></topcomment><scope>Public</scope><default></default><type>Sub</type><getsetlet></getsetlet><nameandparams>Execute</nameandparams><innercode>		objToXmlElems xmlDoc_, RootNode, ScriptObject
+msgbox "saving to " &amp; FileName
+		xmlDoc_.Save FileName</innercode></sub><sub><topcomment></topcomment><scope>Private</scope><default></default><type>Sub</type><getsetlet></getsetlet><nameandparams>objToXmlElems(xmlObj, nodename, t)</nameandparams><innercode>		dim elem, k, child
+		
+		Select Case TypeName(t)
+			Case "ArrayList"
+				set elem = xmlDoc_.CreateElement(nodename)
+				for each k in t
+					objToXmlElems elem, replace(nodename, "collection", ""), k
+				next
+				xmlObj.appendChild elem
+			
+			Case "Dictionary"
+				Set elem = xmlDoc_.CreateElement(nodename)
+				for each k in t.keys
+					objToXmlElems elem, k, t.item(k)
+				next
+				xmlObj.AppendChild elem
+			
+			Case Else
+				Set elem = xmlDoc_.CreateElement(nodename)
+				elem.Text = t
+				xmlObj.AppendChild(elem)
+			
+		end select</innercode></sub></subcollection><propertycollection><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Let</getsetlet><nameandparams>RootNode(p)</nameandparams><innercode>		rootNode_ = p</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Get</getsetlet><nameandparams>RootNode</nameandparams><innercode>		RootNode = rootNode_</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Let</getsetlet><nameandparams>FileName(p)</nameandparams><innercode>		fileName_ = p</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Get</getsetlet><nameandparams>FileName</nameandparams><innercode>		FileName = fileName_</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Set</getsetlet><nameandparams>ScriptObject(o)</nameandparams><innercode>		Set scriptObject_ = o</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Get</getsetlet><nameandparams>ScriptObject</nameandparams><innercode>		Set ScriptObject = scriptObject_</innercode></property></propertycollection></class><class><topcomment></topcomment><scope></scope><default></default><type>Class</type><getsetlet></getsetlet><nameandparams>cls_CodeExtractor</nameandparams><innercode>
+	private originalCode_
+	Public Property Get OriginalCode
+		OriginalCode = originalCode_
+	End Property
+	Private Property Let OriginalCode(p)
+		originalCode_ = p
+	End Property
+	
+	private outerCode_
+	Public Property Get OuterCode
+		OuterCode = outerCode_
+	End Property
+	Private Property Let OuterCode(p)
+		OuterCode_ = p
+	End Property
+	
+	private pattern_
+	Public Property Let Pattern(p)
+		pattern_ = P
+	End Property
+	Public Property Get Pattern
+		Pattern = pattern_
+	End Property
+	
+	Public Function CodeToCollection(code)
+		
+		dim i, re, matches, match
+		dim objCollection, contentDictionary
+		
+		OriginalCode = code
+		
+		Set objCollection = CreateObject("System.Collections.ArrayList")
+		
+		Set re = new regexp
+		re.IgnoreCase = True
+		re.Global = True
+		re.Pattern = Pattern
+				
+		Set matches = re.Execute(code)
+			
+		for each match in Matches
+			
+			set contentDictionary = CreateObject("Scripting.Dictionary")
+			
+			contentDictionary.Add "topcomment", match.submatches(0)	' comment
+			contentDictionary.Add "scope", match.submatches(2)	' comment
+			contentDictionary.Add "default", match.submatches(3)	' comment
+			contentDictionary.Add "type", match.submatches(4)	' comment
+			contentDictionary.Add "getsetlet", match.submatches(5)	' comment
+			contentDictionary.Add "nameandparams", match.submatches(6)	' comment
+			contentDictionary.Add "innercode", match.submatches(7)	' comment
+			
+			objCollection.Add contentDictionary
+		next
+		
+		OuterCode = re.Replace(code, "")
+		
+		Set CodeToCollection = objCollection		
+	End Function</innercode><functioncollection><function><topcomment></topcomment><scope>Public</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>CodeToCollection(code)</nameandparams><innercode>		
+		dim i, re, matches, match
+		dim objCollection, contentDictionary
+		
+		OriginalCode = code
+		
+		Set objCollection = CreateObject("System.Collections.ArrayList")
+		
+		Set re = new regexp
+		re.IgnoreCase = True
+		re.Global = True
+		re.Pattern = Pattern
+				
+		Set matches = re.Execute(code)
+			
+		for each match in Matches
+			
+			set contentDictionary = CreateObject("Scripting.Dictionary")
+			
+			contentDictionary.Add "topcomment", match.submatches(0)	' comment
+			contentDictionary.Add "scope", match.submatches(2)	' comment
+			contentDictionary.Add "default", match.submatches(3)	' comment
+			contentDictionary.Add "type", match.submatches(4)	' comment
+			contentDictionary.Add "getsetlet", match.submatches(5)	' comment
+			contentDictionary.Add "nameandparams", match.submatches(6)	' comment
+			contentDictionary.Add "innercode", match.submatches(7)	' comment
+			
+			objCollection.Add contentDictionary
+		next
+		
+		OuterCode = re.Replace(code, "")
+		
+		Set CodeToCollection = objCollection		</innercode></function></functioncollection><subcollection/><propertycollection><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Get</getsetlet><nameandparams>OriginalCode</nameandparams><innercode>		OriginalCode = originalCode_</innercode></property><property><topcomment></topcomment><scope>Private</scope><default></default><type>Property</type><getsetlet>Let</getsetlet><nameandparams>OriginalCode(p)</nameandparams><innercode>		originalCode_ = p</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Get</getsetlet><nameandparams>OuterCode</nameandparams><innercode>		OuterCode = outerCode_</innercode></property><property><topcomment></topcomment><scope>Private</scope><default></default><type>Property</type><getsetlet>Let</getsetlet><nameandparams>OuterCode(p)</nameandparams><innercode>		OuterCode_ = p</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Let</getsetlet><nameandparams>Pattern(p)</nameandparams><innercode>		pattern_ = P</innercode></property><property><topcomment></topcomment><scope>Public</scope><default></default><type>Property</type><getsetlet>Get</getsetlet><nameandparams>Pattern</nameandparams><innercode>		Pattern = pattern_</innercode></property></propertycollection></class></classcollection><outercode>Option Explicit
+Const ForReading = 1, forAppending = 8
+Const TristateUseDefault = -2, TristateTrue = -1, TristateFalse = 0
+
+const functionPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*()\s*(function)\s+()([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end function"
+const classPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*()\s*(class)\s+()([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end class"
+const subPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*()\s*(sub)\s+()([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end sub"
+const propertyPattern = "((\s?'.*\r\n)*)\r\n\s*(public|private)?\s*(default)?\s*(property)\s+(set|get|let)\s+([^'\r]+).*\r\n([\s\S]+?)\r\n\s*end property"
+
+
+main 
+
+Sub main
+
+	dim scriptToXml 	: 	Set scriptToXml = new cls_ScriptToXml
+	
+	scriptToXml.RootNode = "module"
+	scriptToXml.FileName = Wscript.Arguments.Item(1)
+	Set scriptToXml.ScriptObject = ParseScript (WScript.Arguments.Item(0))
+	scriptToXml.ScriptObject.Add "destination", scriptToXml.FileName
+	scriptToXml.Execute
+	
+End Sub
+
+Public Function ParseScript(fileName)
+
+	dim cls
+	dim codeDictionary
+	Dim classExtractor
+		
+	Set codeDictionary = CreateObject("Scripting.Dictionary")
+	
+	codeDictionary.Add "innercode", ReturnFileAsText(fileName)
+	codeDictionary.Add "source", fileName
+		
+	' First, extract the class
+	Set classExtractor = new_ClassExtractor
+	
+	' Add the class objects to the codedictionary
+	CodeDictionary.Add "classcollection", classExtractor.CodeToCollection(CodeDictionary.Item("innercode"))
+	CodeDictionary.Add "outercode", classExtractor.OuterCode
+	
+	' Parse the code inside all classes to function, sub and property objects
+	for each cls in CodeDictionary.item("classcollection")
+		cls.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(cls.item("innercode"))
+		cls.Add "subcollection", (new_SubExtractor).CodeToCollection(cls.item("innercode"))
+		cls.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(cls.item("innercode"))
+	next
+	
+	' Parse the code outside the classes to function, sub and property objects
+	CodeDictionary.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(CodeDictionary.item("outercode"))
+	CodeDictionary.Add "subcollection", (new_subExtractor).CodeToCollection(CodeDictionary.item("outercode"))
+	CodeDictionary.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(CodeDictionary.item("outercode"))			
+	
+	Set ParseScript = CodeDictionary	
+	
+end Function
+
+
+
+Public Function ReturnFileAsText(filename)
+
+	Dim objFSO, objFile
+
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	Set objFile = objFSO.OpenTextFile(filename, ForReading, False, TristateUseDefault)
+	
+	ReturnFileAsText = objFile.ReadAll
+
+End Function
+
+Public Function new_FunctionExtractor
+	Set new_FunctionExtractor = new cls_CodeExtractor
+	new_FunctionExtractor.Pattern = functionPattern
+End Function
+
+Public Function new_SubExtractor
+	Set new_SubExtractor = new cls_CodeExtractor
+	new_SubExtractor.Pattern = subPattern
+End Function
+
+Public Function new_PropertyExtractor
+	Set new_PropertyExtractor = new cls_CodeExtractor
+	new_PropertyExtractor.Pattern = propertyPattern
+End Function
+
+Public Function new_ClassExtractor
+	Set new_ClassExtractor = new cls_CodeExtractor
+	new_ClassExtractor.Pattern = classPattern
+End Function
+
+Private Function new_ExtractorPrototype
+	Dim o : set o = new cls_CodeExtractor
+	o.AddRegexmatchParser 0, getref("topcommentParser")
+	' etc.
+	Set new_ExtractorPrototype = o
+End Function
+
+
+		
+		
+</outercode><functioncollection><function><topcomment></topcomment><scope>Public</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>ParseScript(fileName)</nameandparams><innercode>
+	dim cls
+	dim codeDictionary
+	Dim classExtractor
+		
+	Set codeDictionary = CreateObject("Scripting.Dictionary")
+	
+	codeDictionary.Add "innercode", ReturnFileAsText(fileName)
+	codeDictionary.Add "source", fileName
+		
+	' First, extract the class
+	Set classExtractor = new_ClassExtractor
+	
+	' Add the class objects to the codedictionary
+	CodeDictionary.Add "classcollection", classExtractor.CodeToCollection(CodeDictionary.Item("innercode"))
+	CodeDictionary.Add "outercode", classExtractor.OuterCode
+	
+	' Parse the code inside all classes to function, sub and property objects
+	for each cls in CodeDictionary.item("classcollection")
+		cls.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(cls.item("innercode"))
+		cls.Add "subcollection", (new_SubExtractor).CodeToCollection(cls.item("innercode"))
+		cls.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(cls.item("innercode"))
+	next
+	
+	' Parse the code outside the classes to function, sub and property objects
+	CodeDictionary.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(CodeDictionary.item("outercode"))
+	CodeDictionary.Add "subcollection", (new_subExtractor).CodeToCollection(CodeDictionary.item("outercode"))
+	CodeDictionary.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(CodeDictionary.item("outercode"))			
+	
+	Set ParseScript = CodeDictionary	</innercode></function><function><topcomment></topcomment><scope>Public</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>ReturnFileAsText(filename)</nameandparams><innercode>
+	Dim objFSO, objFile
+
+	Set objFSO = CreateObject("Scripting.FileSystemObject")
+	Set objFile = objFSO.OpenTextFile(filename, ForReading, False, TristateUseDefault)
+	
+	ReturnFileAsText = objFile.ReadAll</innercode></function><function><topcomment></topcomment><scope>Public</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>new_FunctionExtractor</nameandparams><innercode>	Set new_FunctionExtractor = new cls_CodeExtractor
+	new_FunctionExtractor.Pattern = functionPattern</innercode></function><function><topcomment></topcomment><scope>Public</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>new_SubExtractor</nameandparams><innercode>	Set new_SubExtractor = new cls_CodeExtractor
+	new_SubExtractor.Pattern = subPattern</innercode></function><function><topcomment></topcomment><scope>Public</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>new_PropertyExtractor</nameandparams><innercode>	Set new_PropertyExtractor = new cls_CodeExtractor
+	new_PropertyExtractor.Pattern = propertyPattern</innercode></function><function><topcomment></topcomment><scope>Public</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>new_ClassExtractor</nameandparams><innercode>	Set new_ClassExtractor = new cls_CodeExtractor
+	new_ClassExtractor.Pattern = classPattern</innercode></function><function><topcomment></topcomment><scope>Private</scope><default></default><type>Function</type><getsetlet></getsetlet><nameandparams>new_ExtractorPrototype</nameandparams><innercode>	Dim o : set o = new cls_CodeExtractor
+	o.AddRegexmatchParser 0, getref("topcommentParser")
+	' etc.
+	Set new_ExtractorPrototype = o</innercode></function></functioncollection><subcollection><sub><topcomment></topcomment><scope></scope><default></default><type>Sub</type><getsetlet></getsetlet><nameandparams>main</nameandparams><innercode>
+	dim scriptToXml 	: 	Set scriptToXml = new cls_ScriptToXml
+	
+	scriptToXml.RootNode = "module"
+	scriptToXml.FileName = Wscript.Arguments.Item(1)
+	Set scriptToXml.ScriptObject = ParseScript (WScript.Arguments.Item(0))
+	scriptToXml.ScriptObject.Add "destination", scriptToXml.FileName
+	scriptToXml.Execute</innercode></sub></subcollection><propertycollection/><destination>C:\Users\Bas\Documents\GitHub\CodeDocumenter\output.xml</destination></module>

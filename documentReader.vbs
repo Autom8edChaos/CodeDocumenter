@@ -38,7 +38,6 @@ Public Function ParseScript(fileName)
 	
 	' Add the class objects to the codedictionary
 	CodeDictionary.Add "classcollection", classExtractor.CodeToCollection(CodeDictionary.Item("innercode"))
-	CodeDictionary.Add "outercode", classExtractor.OuterCode
 	
 	' Parse the code inside all classes to function, sub and property objects
 	for each cls in CodeDictionary.item("classcollection")
@@ -48,9 +47,9 @@ Public Function ParseScript(fileName)
 	next
 	
 	' Parse the code outside the classes to function, sub and property objects
-	CodeDictionary.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(CodeDictionary.item("outercode"))
-	CodeDictionary.Add "subcollection", (new_subExtractor).CodeToCollection(CodeDictionary.item("outercode"))
-	CodeDictionary.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(CodeDictionary.item("outercode"))			
+	CodeDictionary.Add "functioncollection", (new_FunctionExtractor).CodeToCollection(classExtractor.OuterCode)
+	CodeDictionary.Add "subcollection", (new_subExtractor).CodeToCollection(classExtractor.OuterCode)
+	CodeDictionary.Add "propertycollection", (new_PropertyExtractor).CodeToCollection(classExtractor.OuterCode)			
 	
 	Set ParseScript = CodeDictionary	
 	
@@ -90,7 +89,6 @@ Class cls_ScriptToXml
 
 	Public Sub Execute
 		objToXmlElems xmlDoc_, RootNode, ScriptObject
-msgbox "saving to " & FileName
 		xmlDoc_.Save FileName
 	End Sub
 	
